@@ -12,6 +12,7 @@ from app.schemas.data import AssetMeta
 logger = logging.getLogger(__name__)
 
 _TICKER_RE = re.compile(r"^[A-Za-z0-9.\-]{1,12}$")
+_KRX_CODE_RE = re.compile(r"^\d{6}$")
 
 
 class ResolverError(ValueError):
@@ -22,13 +23,26 @@ def _looks_like_ticker(asset: str) -> bool:
     return bool(_TICKER_RE.match(asset.strip()))
 
 
+def _normalize_ticker(asset: str) -> str:
+    """Apply common ticker-format conventions.
+
+    - 6-digit numeric codes are treated as KRX listings and suffixed with `.KS`
+      so yfinance can resolve them (e.g. `000660` → `000660.KS`).
+    - Otherwise the input is returned uppercase and trimmed.
+    """
+    raw = asset.strip().upper()
+    if _KRX_CODE_RE.match(raw):
+        return f"{raw}.KS"
+    return raw
+
+
 def _resolve_sync(asset: str) -> AssetMeta:
     """Blocking yfinance call — run via asyncio.to_thread."""
     raw = asset.strip().upper()
     if not raw:
         raise ResolverError("empty asset string")
 
-    candidate = raw if _looks_like_ticker(raw) else raw
+    candidate = _normalize_ticker(raw)
     try:
         ticker = yf.Ticker(candidate)
         info = ticker.info or {}

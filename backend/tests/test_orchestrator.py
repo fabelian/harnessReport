@@ -26,9 +26,14 @@ from app.schemas.inputs import AnalyzeRequest, ModelChoice
 from app.schemas.outputs import (
     Claim,
     FundamentalOutput,
+    IndustryOutput,
     Level,
+    MacroFactor,
+    MacroOutput,
     ReviewerOutput,
     Scenario,
+    SentimentOutput,
+    SentimentSignal,
     TechnicalOutput,
     ValuationMetric,
 )
@@ -104,6 +109,59 @@ def _tech_run() -> AgentRun:
     )
 
 
+def _industry_run() -> AgentRun:
+    return AgentRun(
+        role="industry",
+        output=IndustryOutput(
+            summary="산업 요약",
+            cycle_phase="expansion",
+            demand_drivers=[],
+            supply_constraints=[],
+            competitors=[],
+            risks=[],
+            data_caveats=[],
+        ),
+        model="openai/gpt-oss-120b",
+        prompt_tokens=500,
+        completion_tokens=200,
+        total_tokens=700,
+    )
+
+
+def _macro_run() -> AgentRun:
+    return AgentRun(
+        role="macro",
+        output=MacroOutput(
+            summary="거시 요약",
+            factors=[MacroFactor(label="Fed Funds Rate", value="4.50%", trend="stable")],
+            scenario_bias="tailwind",
+            data_caveats=[],
+        ),
+        model="openai/gpt-oss-120b",
+        prompt_tokens=400,
+        completion_tokens=200,
+        total_tokens=600,
+    )
+
+
+def _sentiment_run() -> AgentRun:
+    return AgentRun(
+        role="sentiment",
+        output=SentimentOutput(
+            summary="심리 요약",
+            overall_tone="bullish",
+            news_signals=[
+                SentimentSignal(name="earnings beat", direction="bullish")
+            ],
+            data_caveats=[],
+        ),
+        model="openai/gpt-oss-120b",
+        prompt_tokens=500,
+        completion_tokens=300,
+        total_tokens=800,
+    )
+
+
 def _rev_run() -> AgentRun:
     return AgentRun(
         role="reviewer",
@@ -129,7 +187,7 @@ async def _collect_events(req: AnalyzeRequest, persist: bool = True) -> list[dic
 
 @pytest.fixture
 def _mock_pipeline():
-    """Patch fetch_all + each agent's `run` method."""
+    """Patch fetch_all + each agent's `run` method (5 analysts + reviewer)."""
     with (
         patch(
             "app.orchestrator.fetch_all",
@@ -142,6 +200,18 @@ def _mock_pipeline():
         patch(
             "app.agents.technical.TechnicalAgent.run",
             new=AsyncMock(return_value=_tech_run()),
+        ),
+        patch(
+            "app.agents.industry.IndustryAgent.run",
+            new=AsyncMock(return_value=_industry_run()),
+        ),
+        patch(
+            "app.agents.macro.MacroAgent.run",
+            new=AsyncMock(return_value=_macro_run()),
+        ),
+        patch(
+            "app.agents.sentiment.SentimentAgent.run",
+            new=AsyncMock(return_value=_sentiment_run()),
         ),
         patch(
             "app.agents.reviewer.ReviewerAgent.run",
@@ -162,15 +232,18 @@ async def test_orchestrator_emits_expected_event_sequence(
     assert types[0] == "job_start"
     assert "data_fetch_start" in types
     assert "data_fetch_done" in types
-    assert types.count("agent_start") == 2
-    assert types.count("agent_done") == 2
+    assert types.count("agent_start") == 5
+    assert types.count("agent_done") == 5
     assert "reviewer_start" in types
     assert "reviewer_done" in types
     assert types[-1] == "done"
 
     done_event = events[-1]
     assert done_event["data"]["ok"] is True
-    assert done_event["data"]["tokens"]["total"] == 1500 + 1100 + 3500
+    # Sum of all 5 analyst + reviewer token totals
+    assert done_event["data"]["tokens"]["total"] == (
+        1500 + 1100 + 700 + 600 + 800 + 3500
+    )
 
 
 async def test_orchestrator_persists_completed_job(
@@ -226,6 +299,18 @@ async def test_orchestrator_continues_when_one_agent_fails(temp_db: Path) -> Non
             new=AsyncMock(side_effect=RuntimeError("technical boom")),
         ),
         patch(
+            "app.agents.industry.IndustryAgent.run",
+            new=AsyncMock(return_value=_industry_run()),
+        ),
+        patch(
+            "app.agents.macro.MacroAgent.run",
+            new=AsyncMock(return_value=_macro_run()),
+        ),
+        patch(
+            "app.agents.sentiment.SentimentAgent.run",
+            new=AsyncMock(return_value=_sentiment_run()),
+        ),
+        patch(
             "app.agents.reviewer.ReviewerAgent.run",
             new=AsyncMock(return_value=_rev_run()),
         ),
@@ -234,8 +319,8 @@ async def test_orchestrator_continues_when_one_agent_fails(temp_db: Path) -> Non
         events = await _collect_events(req)
 
     types = [e["event"] for e in events]
-    # technical errored, fundamental and reviewer ran
-    assert types.count("agent_done") == 1
+    # technical errored; fundamental + industry + macro + sentiment + reviewer ran
+    assert types.count("agent_done") == 4
     assert "reviewer_done" in types
     assert types[-1] == "done"
     assert events[-1]["data"]["ok"] is True

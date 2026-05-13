@@ -79,7 +79,8 @@ async def test_full_pipeline_runs_in_demo_mode(temp_db: Path) -> None:
             events.append((evt.event, json.loads(evt.data_json())))
 
     types = [e[0] for e in events]
-    assert types.count("agent_done") == 2
+    # 5 analyst agents + reviewer
+    assert types.count("agent_done") == 5
     assert "reviewer_done" in types
     assert types[-1] == "done"
     assert events[-1][1]["ok"] is True

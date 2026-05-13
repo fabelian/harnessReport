@@ -129,37 +129,135 @@ _TECH_PAYLOAD: dict[str, Any] = {
 }
 
 
+_INDUSTRY_PAYLOAD: dict[str, Any] = {
+    "summary": "[데모] AI 인프라 사이클 expansion. HBM·서버 메모리 수요 강세.",
+    "cycle_phase": "expansion",
+    "demand_drivers": [
+        {
+            "text": "빅테크 capex 가이드 상향이 HBM·DRAM 수요 견인.",
+            "label": "estimate",
+            "citations": [{"source": "news context"}],
+        }
+    ],
+    "supply_constraints": [
+        {"text": "TSMC CoWoS 캐파가 HBM 출하 상한.", "label": "opinion", "citations": []}
+    ],
+    "competitors": [
+        {
+            "name": "Samsung (005930)",
+            "position": "challenger",
+            "strength": "종합 메모리 1위, HBM 추격",
+            "weakness": "HBM 수익성 SK 대비 낮음",
+        },
+        {
+            "name": "Micron (MU)",
+            "position": "challenger",
+            "strength": "미국 본토, HBM3E 양산",
+            "weakness": "DRAM 점유율 낮음",
+        },
+    ],
+    "market_share_note": "[데모] 정확한 점유율은 외부 자료 확인 필요",
+    "risks": [
+        {"text": "CXMT 양산 확대 시 레거시 DRAM 가격 하방.", "label": "opinion", "citations": []}
+    ],
+    "data_caveats": ["[데모 모드] 시장조사기관 정량 자료 미포함."],
+}
+
+
+_MACRO_PAYLOAD: dict[str, Any] = {
+    "summary": "[데모] 금리 동결 + 빅테크 capex 상향 — 메모리주 우호.",
+    "factors": [
+        {
+            "label": "Fed Funds Rate",
+            "value": "4.50%",
+            "trend": "stable",
+            "impact_on_asset": "[데모] 멀티플 압력 제한적.",
+        },
+        {
+            "label": "10Y UST",
+            "value": "4.20%",
+            "trend": "stable",
+            "impact_on_asset": "[데모] 할인율 안정.",
+        },
+    ],
+    "fx_view": "[데모] 달러 강세 — 한국 수출주 단기 환산 호재.",
+    "capex_cycle": "[데모] 빅테크 4사 capex 가이드 yoy +70%, AI 비중 75%.",
+    "correlation_notes": ["[데모] SOX·NVDA 강한 양의 상관."],
+    "scenario_bias": "tailwind",
+    "data_caveats": ["[데모 모드] FRED 일부 시리즈 미포함."],
+}
+
+
+_SENTIMENT_PAYLOAD: dict[str, Any] = {
+    "summary": "[데모] 외인 매수 + 어닝 서프라이즈 — bullish, 단 RSI 과열 동반.",
+    "overall_tone": "bullish",
+    "consensus_note": "본 분석에서는 미제공 — 미확보",
+    "news_signals": [
+        {
+            "name": "Q1 어닝 서프라이즈",
+            "direction": "bullish",
+            "strength": "strong",
+            "evidence": "[데모] EPS 컨센 상회.",
+        }
+    ],
+    "flow_signals": [
+        {
+            "name": "외인 매수 전환",
+            "direction": "bullish",
+            "strength": "moderate",
+            "evidence": "[데모] 최근 5거래일 외인 순매수.",
+        }
+    ],
+    "risks": [
+        {"text": "[데모] 단기 RSI 70 근접 — 차익 매물.", "label": "opinion", "citations": []}
+    ],
+    "data_caveats": ["[데모 모드] 컨센서스 데이터 미포함."],
+}
+
+
 _REVIEWER_PAYLOAD: dict[str, Any] = {
     "final_report_markdown": """# {ASSET} 주식 가치 분석 보고서 (DEMO)
 
 > **⚠️ 데모 모드**: 본 보고서는 `OPENROUTER_API_KEY=demo` 설정으로 생성된 고정 응답입니다. 실제 분석이 아닙니다.
 
 ## 0. Executive Summary
-- 펀더멘털 [F]: 데이터센터 매출 견조, 멀티플은 정점 부근.
-- 기술적 [T]: 정배열 + 과열 직전.
+- 펀더멘털·산업 tailwind + 기술적 정배열 [F][T][I][M], 단기 과열 [T][S].
 - Base 적정주가 범위: $880~$1,000.
 
-## 1. 펀더멘털 [F]
-- 2026Q1 매출 $44B (op margin 66%).
+## 1. 기업 개요
+- (컨텍스트 메타 그대로)
+
+## 2. 펀더멘털 [F]
 - Fwd PER 30x peer median 28x.
 
-## 2. 기술적 [T]
+## 3. 기술적 [T]
 - MA 완전 정배열, RSI 62.
-- 지지 850/700, 저항 950.
 
-## 3. 통합 시나리오
+## 4. 산업·경쟁구도 [I]
+- 사이클: expansion. HBM 수요 견조.
+
+## 5. 거시 환경 [M]
+- 금리 동결, capex tailwind.
+
+## 6. 시장 심리·수급 [S]
+- 외인 매수 + 어닝 서프라이즈. 단기 과열.
+
+## 7. 통합 시나리오
 | 시나리오 | 트리거 | 가격 범위 |
 |---------|--------|----------|
-| Bullish | 데이터센터 +60% YoY, 950 돌파 | $980~$1,200 |
-| **Base** | 사이클 정상화, 박스권 | **$850~$1,000** |
-| Bearish | AI capex 둔화, MA50 이탈 | $550~$800 |
+| Bullish | 데이터센터 +60% YoY, 950 돌파 [F][T] | $980~$1,200 |
+| **Base** | 사이클 정상화, capex 유지 [I][M] | **$850~$1,000** |
+| Bearish | AI capex 둔화, MA50 이탈 [M][T] | $550~$800 |
 
-## 4. 모니터링
-- 다음 분기 데이터센터 가이던스
-- AI capex 가이드 변경
-- ASIC 경쟁 시그널
+## 8. 모니터링
+- 다음 분기 데이터센터 가이던스 [F]
+- AI capex 가이드 변경 [M]
+- ASIC 경쟁 시그널 [I]
 
-## 5. 면책 조항
+## 9. 데이터 일관성 / 미해결 이슈
+- 컨센서스 데이터 미확보 [S]
+
+## 10. 면책 조항
 본 보고서는 데모 모드 고정 응답이며 어떤 투자 권유도 아닙니다.
 """,
     "discrepancies": [],
@@ -170,8 +268,15 @@ _REVIEWER_PAYLOAD: dict[str, Any] = {
 
 
 def _detect_role(system: str) -> str:
-    if "Integrator-Reviewer" in system or "통합" in system or "Discrepancy" in system:
+    # Reviewer first (its prompt also contains analyst keywords)
+    if "Integrator-Reviewer" in system or "Discrepancy" in system:
         return "reviewer"
+    if "Industry Analyst" in system:
+        return "industry"
+    if "Macro Analyst" in system:
+        return "macro"
+    if "Sentiment Analyst" in system:
+        return "sentiment"
     if "Technical Analyst" in system:
         return "technical"
     if "Fundamental Analyst" in system:
@@ -184,6 +289,12 @@ def _payload_for(role: str, asset_hint: str = "ASSET") -> dict[str, Any]:
         return _FUND_PAYLOAD
     if role == "technical":
         return _TECH_PAYLOAD
+    if role == "industry":
+        return _INDUSTRY_PAYLOAD
+    if role == "macro":
+        return _MACRO_PAYLOAD
+    if role == "sentiment":
+        return _SENTIMENT_PAYLOAD
     if role == "reviewer":
         payload = json.loads(json.dumps(_REVIEWER_PAYLOAD))
         payload["final_report_markdown"] = payload["final_report_markdown"].replace(

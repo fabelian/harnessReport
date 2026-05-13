@@ -11,7 +11,13 @@ import json
 from typing import Any
 
 from app.schemas.data import AnalysisData
-from app.schemas.outputs import FundamentalOutput, TechnicalOutput
+from app.schemas.outputs import (
+    FundamentalOutput,
+    IndustryOutput,
+    MacroOutput,
+    SentimentOutput,
+    TechnicalOutput,
+)
 
 
 def _fmt_num(v: float | int | None, *, pct: bool = False, decimals: int = 2) -> str:
@@ -251,24 +257,27 @@ def render_agent_outputs_for_reviewer(
     data: AnalysisData,
     fundamental: FundamentalOutput | None,
     technical: TechnicalOutput | None,
+    industry: IndustryOutput | None = None,
+    macro: MacroOutput | None = None,
+    sentiment: SentimentOutput | None = None,
 ) -> str:
     """Bundle the analyst JSON outputs (as a single context block) for the reviewer."""
-    parts = [
-        "# Upstream Agent Outputs",
-        "## Fundamental Output (JSON)",
-        "```json",
-        fundamental.model_dump_json(indent=2) if fundamental else "null",
-        "```",
-        "",
-        "## Technical Output (JSON)",
-        "```json",
-        technical.model_dump_json(indent=2) if technical else "null",
-        "```",
-        "",
-        "# Original Data Context",
-        render_full_context(data),
-    ]
-    return "\n".join(parts)
+    sections: list[str] = ["# Upstream Agent Outputs"]
+    for label, model in [
+        ("Fundamental", fundamental),
+        ("Technical", technical),
+        ("Industry", industry),
+        ("Macro", macro),
+        ("Sentiment", sentiment),
+    ]:
+        sections.append(f"## {label} Output (JSON)")
+        sections.append("```json")
+        sections.append(model.model_dump_json(indent=2) if model else "null")
+        sections.append("```")
+        sections.append("")
+    sections.append("# Original Data Context")
+    sections.append(render_full_context(data))
+    return "\n".join(sections)
 
 
 def safe_json_loads(text: str) -> Any:

@@ -5,13 +5,17 @@
 
 import type {
   AgentDoneData,
+  AgentRole,
   DataFetchDoneData,
   DoneData,
   ErrorData,
-  FundamentalOutput,
+  IndustryOutput,
   JobStartData,
+  MacroOutput,
   ReviewerDoneData,
+  SentimentOutput,
   SSEMessage,
+  FundamentalOutput,
   TechnicalOutput,
   TokenUsage,
 } from "@/lib/types";
@@ -25,9 +29,16 @@ export type Phase =
   | "done"
   | "failed";
 
+export type AgentOutput =
+  | FundamentalOutput
+  | TechnicalOutput
+  | IndustryOutput
+  | MacroOutput
+  | SentimentOutput;
+
 export interface AgentState {
   status: "pending" | "running" | "done" | "failed";
-  output: FundamentalOutput | TechnicalOutput | null;
+  output: AgentOutput | null;
   tokens: TokenUsage | null;
   retried: boolean;
   error: string | null;
@@ -43,6 +54,16 @@ export interface ReviewerState {
   error: string | null;
 }
 
+export const ANALYST_ROLES = [
+  "fundamental",
+  "technical",
+  "industry",
+  "macro",
+  "sentiment",
+] as const satisfies readonly AgentRole[];
+
+export type AgentsState = Record<AgentRole, AgentState>;
+
 export interface AnalysisState {
   phase: Phase;
   jobId: string | null;
@@ -50,32 +71,12 @@ export interface AnalysisState {
   asOfDate: string | null;
   model: string | null;
   dataFetchSummary: DataFetchDoneData["summary"] | null;
-  agents: {
-    fundamental: AgentState;
-    technical: AgentState;
-  };
+  agents: AgentsState;
   reviewer: ReviewerState;
   errors: ErrorData[];
   durationMs: number | null;
   tokens: TokenUsage | null;
 }
-
-export const initialState: AnalysisState = {
-  phase: "idle",
-  jobId: null,
-  asset: null,
-  asOfDate: null,
-  model: null,
-  dataFetchSummary: null,
-  agents: {
-    fundamental: blankAgent(),
-    technical: blankAgent(),
-  },
-  reviewer: blankReviewer(),
-  errors: [],
-  durationMs: null,
-  tokens: null,
-};
 
 function blankAgent(): AgentState {
   return {
@@ -99,13 +100,41 @@ function blankReviewer(): ReviewerState {
   };
 }
 
+function blankAgents(): AgentsState {
+  return ANALYST_ROLES.reduce(
+    (acc, role) => {
+      acc[role] = blankAgent();
+      return acc;
+    },
+    {} as AgentsState,
+  );
+}
+
+export const initialState: AnalysisState = {
+  phase: "idle",
+  jobId: null,
+  asset: null,
+  asOfDate: null,
+  model: null,
+  dataFetchSummary: null,
+  agents: blankAgents(),
+  reviewer: blankReviewer(),
+  errors: [],
+  durationMs: null,
+  tokens: null,
+};
+
 export type Action =
   | { type: "RESET" }
   | { type: "EVENT"; msg: SSEMessage }
   | { type: "STREAM_FAILED"; message: string };
 
+function isAnalystRole(role: string | undefined): role is AgentRole {
+  return !!role && (ANALYST_ROLES as readonly string[]).includes(role);
+}
+
 export function reduce(state: AnalysisState, action: Action): AnalysisState {
-  if (action.type === "RESET") return { ...initialState };
+  if (action.type === "RESET") return { ...initialState, agents: blankAgents() };
   if (action.type === "STREAM_FAILED") {
     return {
       ...state,
@@ -139,22 +168,27 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
         phase: "analyzing",
         dataFetchSummary: d.summary,
         errors: d.errors?.length
-          ? [...state.errors, ...d.errors.map((m) => ({ stage: "data_fetch", message: m }))]
+          ? [
+              ...state.errors,
+              ...d.errors.map((m) => ({ stage: "data_fetch", message: m })),
+            ]
           : state.errors,
       };
     }
     case "agent_start": {
-      const agent = (data as { agent: "fundamental" | "technical" }).agent;
+      const role = (data as { agent: string }).agent;
+      if (!isAnalystRole(role)) return state;
       return {
         ...state,
         agents: {
           ...state.agents,
-          [agent]: { ...state.agents[agent], status: "running" },
+          [role]: { ...state.agents[role], status: "running" },
         },
       };
     }
     case "agent_done": {
       const d = data as AgentDoneData;
+      if (!isAnalystRole(d.agent)) return state;
       return {
         ...state,
         agents: {
@@ -170,7 +204,11 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
       };
     }
     case "reviewer_start":
-      return { ...state, phase: "reviewing", reviewer: { ...state.reviewer, status: "running" } };
+      return {
+        ...state,
+        phase: "reviewing",
+        reviewer: { ...state.reviewer, status: "running" },
+      };
     case "reviewer_done": {
       const d = data as ReviewerDoneData;
       return {
@@ -189,10 +227,14 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
     case "error": {
       const d = data as ErrorData;
       const next = { ...state, errors: [...state.errors, d] };
-      if (d.stage === "agent" && d.agent && (d.agent === "fundamental" || d.agent === "technical")) {
+      if (d.stage === "agent" && isAnalystRole(d.agent)) {
         next.agents = {
           ...state.agents,
-          [d.agent]: { ...state.agents[d.agent], status: "failed", error: d.message },
+          [d.agent]: {
+            ...state.agents[d.agent],
+            status: "failed",
+            error: d.message,
+          },
         };
       } else if (d.stage === "reviewer") {
         next.reviewer = { ...state.reviewer, status: "failed", error: d.message };

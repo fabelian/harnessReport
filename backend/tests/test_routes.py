@@ -22,7 +22,10 @@ from app.schemas.data import (
 )
 from app.schemas.outputs import (
     FundamentalOutput,
+    IndustryOutput,
+    MacroOutput,
     ReviewerOutput,
+    SentimentOutput,
     TechnicalOutput,
 )
 
@@ -69,6 +72,24 @@ def _runs():
             total_tokens=100,
         ),
         AgentRun(
+            role="industry",
+            output=IndustryOutput(summary="i", cycle_phase="expansion"),
+            model="openai/gpt-oss-120b",
+            total_tokens=80,
+        ),
+        AgentRun(
+            role="macro",
+            output=MacroOutput(summary="m"),
+            model="openai/gpt-oss-120b",
+            total_tokens=70,
+        ),
+        AgentRun(
+            role="sentiment",
+            output=SentimentOutput(summary="s", overall_tone="bullish"),
+            model="openai/gpt-oss-120b",
+            total_tokens=90,
+        ),
+        AgentRun(
             role="reviewer",
             output=ReviewerOutput(final_report_markdown="# Report"),
             model="openai/gpt-oss-120b",
@@ -95,7 +116,7 @@ def test_models_endpoint_lists_choices() -> None:
 
 
 def test_analyze_streams_sse_to_done(temp_db: Path) -> None:
-    fund_run, tech_run, rev_run = _runs()
+    fund_run, tech_run, ind_run, macro_run, sent_run, rev_run = _runs()
     with (
         patch(
             "app.orchestrator.fetch_all", new=AsyncMock(return_value=_data())
@@ -107,6 +128,18 @@ def test_analyze_streams_sse_to_done(temp_db: Path) -> None:
         patch(
             "app.agents.technical.TechnicalAgent.run",
             new=AsyncMock(return_value=tech_run),
+        ),
+        patch(
+            "app.agents.industry.IndustryAgent.run",
+            new=AsyncMock(return_value=ind_run),
+        ),
+        patch(
+            "app.agents.macro.MacroAgent.run",
+            new=AsyncMock(return_value=macro_run),
+        ),
+        patch(
+            "app.agents.sentiment.SentimentAgent.run",
+            new=AsyncMock(return_value=sent_run),
         ),
         patch(
             "app.agents.reviewer.ReviewerAgent.run",

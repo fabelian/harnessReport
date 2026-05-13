@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     data_summary    TEXT,
     fundamental     TEXT,
     technical       TEXT,
+    industry        TEXT,
+    macro           TEXT,
+    sentiment       TEXT,
     reviewer_report TEXT,
     discrepancies   TEXT,
     open_questions  TEXT,
@@ -39,6 +42,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_created_idx ON jobs(created_at DESC);
 """
+
+
+# Idempotent migration: add columns introduced in Phase 6 if missing.
+_MIGRATIONS = [
+    "ALTER TABLE jobs ADD COLUMN industry TEXT",
+    "ALTER TABLE jobs ADD COLUMN macro TEXT",
+    "ALTER TABLE jobs ADD COLUMN sentiment TEXT",
+]
 
 
 def database_path() -> str:
@@ -52,12 +63,18 @@ def database_path() -> str:
 
 
 async def init_db() -> None:
-    """Create the schema if it doesn't yet exist."""
+    """Create the schema if it doesn't yet exist; run lightweight migrations."""
     path = database_path()
     if path != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(path) as db:
         await db.executescript(_SCHEMA)
+        # Best-effort additive migrations — skip if column already exists.
+        for stmt in _MIGRATIONS:
+            try:
+                await db.execute(stmt)
+            except Exception:
+                pass
         await db.commit()
     logger.info("db initialised | path=%s", path)
 

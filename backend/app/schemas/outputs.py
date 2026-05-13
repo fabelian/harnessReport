@@ -114,6 +114,73 @@ class ReviewerOutput(BaseModel):
     used_model: str | None = None
 
 
+# --- industry ----------------------------------------------------------------
+
+
+class CompetitorRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    position: str | None = None  # e.g. "leader", "challenger", "follower"
+    strength: str | None = None
+    weakness: str | None = None
+
+
+class IndustryOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    summary: str
+    cycle_phase: str  # e.g. "early-recovery", "expansion", "peak", "downturn"
+    demand_drivers: list[Claim] = Field(default_factory=list)
+    supply_constraints: list[Claim] = Field(default_factory=list)
+    competitors: list[CompetitorRow] = Field(default_factory=list)
+    market_share_note: str | None = None
+    risks: list[Claim] = Field(default_factory=list)
+    data_caveats: list[str] = Field(default_factory=list)
+
+
+# --- macro -------------------------------------------------------------------
+
+
+class MacroFactor(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    label: str  # e.g. "Fed Funds Rate", "10Y UST"
+    value: str | None = None  # human-readable, may include unit
+    trend: str | None = None  # "rising" / "falling" / "stable"
+    impact_on_asset: str | None = None
+
+
+class MacroOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    summary: str
+    factors: list[MacroFactor] = Field(default_factory=list)
+    fx_view: str | None = None  # e.g. KRW/USD commentary
+    capex_cycle: str | None = None
+    correlation_notes: list[str] = Field(default_factory=list)
+    scenario_bias: str | None = None  # "tailwind" / "neutral" / "headwind"
+    data_caveats: list[str] = Field(default_factory=list)
+
+
+# --- sentiment ---------------------------------------------------------------
+
+
+class SentimentSignal(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    direction: Literal["bullish", "neutral", "bearish"]
+    strength: Literal["weak", "moderate", "strong"] | None = None
+    evidence: str | None = None
+
+
+class SentimentOutput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    summary: str
+    overall_tone: Literal["bullish", "neutral", "bearish"]
+    consensus_note: str | None = None  # 12M target / earnings estimates if available
+    news_signals: list[SentimentSignal] = Field(default_factory=list)
+    flow_signals: list[SentimentSignal] = Field(default_factory=list)
+    risks: list[Claim] = Field(default_factory=list)
+    data_caveats: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "Citation",
     "Claim",
@@ -123,6 +190,12 @@ __all__ = [
     "FundamentalOutput",
     "Level",
     "TechnicalOutput",
+    "CompetitorRow",
+    "IndustryOutput",
+    "MacroFactor",
+    "MacroOutput",
+    "SentimentSignal",
+    "SentimentOutput",
     "Discrepancy",
     "ReviewerOutput",
 ]

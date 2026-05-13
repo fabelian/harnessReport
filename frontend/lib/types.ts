@@ -92,6 +92,58 @@ export interface TechnicalOutput {
   data_caveats: string[];
 }
 
+export interface CompetitorRow {
+  name: string;
+  position?: string | null;
+  strength?: string | null;
+  weakness?: string | null;
+}
+
+export interface IndustryOutput {
+  summary: string;
+  cycle_phase: string;
+  demand_drivers: Claim[];
+  supply_constraints: Claim[];
+  competitors: CompetitorRow[];
+  market_share_note?: string | null;
+  risks: Claim[];
+  data_caveats: string[];
+}
+
+export interface MacroFactor {
+  label: string;
+  value?: string | null;
+  trend?: string | null;
+  impact_on_asset?: string | null;
+}
+
+export interface MacroOutput {
+  summary: string;
+  factors: MacroFactor[];
+  fx_view?: string | null;
+  capex_cycle?: string | null;
+  correlation_notes: string[];
+  scenario_bias?: string | null;
+  data_caveats: string[];
+}
+
+export interface SentimentSignal {
+  name: string;
+  direction: "bullish" | "neutral" | "bearish";
+  strength?: "weak" | "moderate" | "strong" | null;
+  evidence?: string | null;
+}
+
+export interface SentimentOutput {
+  summary: string;
+  overall_tone: "bullish" | "neutral" | "bearish";
+  consensus_note?: string | null;
+  news_signals: SentimentSignal[];
+  flow_signals: SentimentSignal[];
+  risks: Claim[];
+  data_caveats: string[];
+}
+
 export interface Discrepancy {
   metric: string;
   values: string[];
@@ -150,9 +202,21 @@ export interface DataFetchDoneData {
   errors: string[];
 }
 
+export type AgentRole =
+  | "fundamental"
+  | "technical"
+  | "industry"
+  | "macro"
+  | "sentiment";
+
 export interface AgentDoneData {
-  agent: "fundamental" | "technical";
-  output: FundamentalOutput | TechnicalOutput;
+  agent: AgentRole;
+  output:
+    | FundamentalOutput
+    | TechnicalOutput
+    | IndustryOutput
+    | MacroOutput
+    | SentimentOutput;
   tokens: TokenUsage;
   model: string;
   retried: boolean;
@@ -195,6 +259,9 @@ export interface JobRecord {
   data_summary?: Record<string, unknown> | null;
   fundamental?: FundamentalOutput | null;
   technical?: TechnicalOutput | null;
+  industry?: IndustryOutput | null;
+  macro?: MacroOutput | null;
+  sentiment?: SentimentOutput | null;
   reviewer_report?: string | null;
   discrepancies?: Discrepancy[] | null;
   open_questions?: string[] | null;

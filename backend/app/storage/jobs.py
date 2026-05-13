@@ -53,6 +53,9 @@ class JobRecord(BaseModel):
     data_summary: dict | None = None
     fundamental: dict | None = None
     technical: dict | None = None
+    industry: dict | None = None
+    macro: dict | None = None
+    sentiment: dict | None = None
     reviewer_report: str | None = None
     discrepancies: list | None = None
     open_questions: list | None = None
@@ -82,6 +85,9 @@ async def complete_job(
     data_summary: dict | None,
     fundamental: Any,
     technical: Any,
+    industry: Any = None,
+    macro: Any = None,
+    sentiment: Any = None,
     reviewer_report: str | None,
     discrepancies: Any,
     open_questions: Any,
@@ -97,6 +103,9 @@ async def complete_job(
                 data_summary=?,
                 fundamental=?,
                 technical=?,
+                industry=?,
+                macro=?,
+                sentiment=?,
                 reviewer_report=?,
                 discrepancies=?,
                 open_questions=?,
@@ -109,6 +118,9 @@ async def complete_job(
                 _dump(data_summary),
                 _dump(fundamental),
                 _dump(technical),
+                _dump(industry),
+                _dump(macro),
+                _dump(sentiment),
                 reviewer_report,
                 _dump(discrepancies),
                 _dump(open_questions),
@@ -147,6 +159,9 @@ async def get_job(job_id: str) -> JobRecord | None:
         data_summary=_load(row["data_summary"]),
         fundamental=_load(row["fundamental"]),
         technical=_load(row["technical"]),
+        industry=_load(row["industry"]) if "industry" in row.keys() else None,
+        macro=_load(row["macro"]) if "macro" in row.keys() else None,
+        sentiment=_load(row["sentiment"]) if "sentiment" in row.keys() else None,
         reviewer_report=row["reviewer_report"],
         discrepancies=_load(row["discrepancies"]),
         open_questions=_load(row["open_questions"]),

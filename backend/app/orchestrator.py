@@ -1,16 +1,13 @@
-"""End-to-end analysis pipeline.
+"""End-to-end analysis pipeline (5 analysts + 1 reviewer).
 
 Yields `SSEEvent`s as the run progresses:
 
     job_start → data_fetch_start → data_fetch_done →
-    (agent_start × 2) → (agent_done × 2 in completion order) →
+    (agent_start × N) → (agent_done × N in completion order) →
     reviewer_start → reviewer_done → done
 
 On any unrecoverable failure the orchestrator emits an `error` event and a
 final `done` event so the SSE stream always closes cleanly.
-
-The orchestrator is the single place that knows about persistence; routes
-just consume the async iterator.
 """
 from __future__ import annotations
 
@@ -22,16 +19,35 @@ from collections.abc import AsyncIterator
 
 from app.agents.base import AgentRun
 from app.agents.fundamental import FundamentalAgent
+from app.agents.industry import IndustryAgent
+from app.agents.macro import MacroAgent
 from app.agents.reviewer import ReviewerAgent
+from app.agents.sentiment import SentimentAgent
 from app.agents.technical import TechnicalAgent
 from app.data.fetcher import fetch_all
 from app.schemas.data import AnalysisData
 from app.schemas.events import SSEEvent
 from app.schemas.inputs import AnalyzeRequest
-from app.schemas.outputs import FundamentalOutput, ReviewerOutput, TechnicalOutput
+from app.schemas.outputs import (
+    FundamentalOutput,
+    IndustryOutput,
+    MacroOutput,
+    ReviewerOutput,
+    SentimentOutput,
+    TechnicalOutput,
+)
 from app.storage import jobs as job_store
 
 logger = logging.getLogger(__name__)
+
+# Order matters only for SSE event emission and persistence labels.
+ANALYST_ROLES: tuple[str, ...] = (
+    "fundamental",
+    "technical",
+    "industry",
+    "macro",
+    "sentiment",
+)
 
 
 def _agent_done_payload(run: AgentRun) -> dict:
@@ -109,49 +125,44 @@ async def run_analysis(
 
     # --- 2. Analysts in parallel --------------------------------------------
 
-    fundamental_agent = FundamentalAgent()
-    technical_agent = TechnicalAgent()
+    analyst_specs = [
+        ("fundamental", FundamentalAgent()),
+        ("technical", TechnicalAgent()),
+        ("industry", IndustryAgent()),
+        ("macro", MacroAgent()),
+        ("sentiment", SentimentAgent()),
+    ]
 
-    fund_task = asyncio.create_task(
-        fundamental_agent.run(data, model=model_id),
-        name="fundamental",
-    )
-    tech_task = asyncio.create_task(
-        technical_agent.run(data, model=model_id),
-        name="technical",
-    )
+    tasks: dict[asyncio.Task, str] = {}
+    for role, agent in analyst_specs:
+        task = asyncio.create_task(agent.run(data, model=model_id), name=role)
+        tasks[task] = role
+        yield SSEEvent("agent_start", {"agent": role})
 
-    yield SSEEvent("agent_start", {"agent": "fundamental"})
-    yield SSEEvent("agent_start", {"agent": "technical"})
-
-    fund_output: FundamentalOutput | None = None
-    tech_output: TechnicalOutput | None = None
+    outputs: dict[str, AgentRun | None] = {role: None for role in ANALYST_ROLES}
     agent_errors: list[str] = []
 
-    pending = {fund_task, tech_task}
+    pending = set(tasks.keys())
     while pending:
         done, pending = await asyncio.wait(
             pending, return_when=asyncio.FIRST_COMPLETED
         )
         for finished in done:
-            label = finished.get_name()
+            role = tasks[finished]
             try:
                 run = finished.result()
                 _accumulate(run)
-                if run.role == "fundamental":
-                    fund_output = run.output  # type: ignore[assignment]
-                elif run.role == "technical":
-                    tech_output = run.output  # type: ignore[assignment]
+                outputs[run.role] = run
                 yield SSEEvent("agent_done", _agent_done_payload(run))
             except Exception as exc:
-                logger.exception("agent[%s] failed", label)
-                agent_errors.append(f"{label}: {exc}")
+                logger.exception("agent[%s] failed", role)
+                agent_errors.append(f"{role}: {exc}")
                 yield SSEEvent(
                     "error",
-                    {"stage": "agent", "agent": label, "message": str(exc)},
+                    {"stage": "agent", "agent": role, "message": str(exc)},
                 )
 
-    if fund_output is None and tech_output is None:
+    if not any(outputs.values()):
         await _finalize_failure(
             job_id,
             started,
@@ -166,9 +177,20 @@ async def run_analysis(
     yield SSEEvent("reviewer_start", {})
     reviewer_agent = ReviewerAgent()
     reviewer_output: ReviewerOutput | None = None
+
+    def _out(role: str):
+        run = outputs.get(role)
+        return run.output if run else None
+
     try:
         rev_run = await reviewer_agent.run(
-            data, fund_output, tech_output, model=model_id
+            data,
+            _out("fundamental"),  # type: ignore[arg-type]
+            _out("technical"),  # type: ignore[arg-type]
+            _out("industry"),  # type: ignore[arg-type]
+            _out("macro"),  # type: ignore[arg-type]
+            _out("sentiment"),  # type: ignore[arg-type]
+            model=model_id,
         )
         _accumulate(rev_run)
         reviewer_output = rev_run.output  # type: ignore[assignment]
@@ -204,8 +226,11 @@ async def run_analysis(
                 job_id=job_id,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 data_summary=data.summary(),
-                fundamental=fund_output.model_dump() if fund_output else None,
-                technical=tech_output.model_dump() if tech_output else None,
+                fundamental=_dump(outputs.get("fundamental")),
+                technical=_dump(outputs.get("technical")),
+                industry=_dump(outputs.get("industry")),
+                macro=_dump(outputs.get("macro")),
+                sentiment=_dump(outputs.get("sentiment")),
                 reviewer_report=reviewer_output.final_report_markdown,
                 discrepancies=[d.model_dump() for d in reviewer_output.discrepancies],
                 open_questions=reviewer_output.open_questions,
@@ -215,6 +240,10 @@ async def run_analysis(
             logger.warning("persist complete_job failed: %s", exc)
 
     yield SSEEvent("done", _done_payload(job_id, started, ok=True, tokens=token_usage))
+
+
+def _dump(run: AgentRun | None) -> dict | None:
+    return run.output.model_dump() if run else None
 
 
 def _done_payload(
