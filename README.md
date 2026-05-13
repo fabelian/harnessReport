@@ -103,6 +103,11 @@ Claude Code 세션에서 다음과 같이 요청하면 `sk-hynix-stock-orchestra
 ├── CLAUDE.md                       # 하네스 사용 트리거 정의
 ├── SK하이닉스_주식분석_보고서_*.md # 출력 보고서
 ├── _workspace/                     # 영역별 분석 원본
+├── docs/
+│   └── ARCHITECTURE.md             # 웹앱 설계 문서
+├── backend/                        # FastAPI + OpenRouter (in development)
+├── frontend/                       # Next.js 14 (in development)
+├── docker-compose.yml
 └── .claude/
     ├── agents/                     # 6개 전문가 에이전트 정의
     │   ├── fundamental-analyst.md
@@ -115,6 +120,124 @@ Claude Code 세션에서 다음과 같이 요청하면 `sk-hynix-stock-orchestra
         ├── sk-hynix-stock-orchestrator/  # 오케스트레이션 워크플로우
         └── equity-research-method/       # 공통 분석 방법론 + references
 ```
+
+---
+
+## 웹 애플리케이션 (MVP)
+
+OpenRouter API(Gemma 3 27B, GPT-OSS 120B)로 동일한 다관점 분석을 **웹에서** 실행할 수 있는 별도 구현입니다. Claude Code 하네스와 독립적으로 동작합니다.
+
+- **백엔드**: FastAPI + Python 3.11~3.13 (3.14 미지원), OpenRouter 호출, asyncio 병렬 오케스트레이션, SSE 진행률 스트리밍, SQLite 영속화
+- **프론트엔드**: Next.js 14 (App Router), Tailwind, react-markdown
+- **MVP 범위**: 미국 주식 1종 + 펀더멘털·기술적 2개 영역 + 통합 리뷰어
+- **데이터**: yfinance (가격·재무), FRED (거시, 옵션), NewsAPI/Tavily (뉴스, 옵션) — 사전 수집 후 컨텍스트 주입
+
+### 빠른 시작 — 데모 모드 (API 키 불필요)
+
+OpenRouter 키 없이 UI·파이프라인 전체를 검증할 수 있는 데모 모드:
+
+```powershell
+# 백엔드 (Python 3.11~3.13 필요)
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+$env:OPENROUTER_API_KEY = "demo"     # ← 데모 모드 활성화
+uvicorn app.main:app --reload --port 8000
+
+# 프론트엔드 (별도 터미널)
+cd frontend
+npm install
+npm run dev
+```
+
+브라우저에서 <http://localhost:3000> → `NVDA` + 날짜 → "분석 시작" → 약 1초 안에 데모 응답 기반 보고서 출력. 백엔드 API는 <http://localhost:8000/docs>.
+
+### 실제 분석 (OpenRouter 키 필요)
+
+```powershell
+cd backend
+copy .env.example .env
+# .env 편집:
+#   OPENROUTER_API_KEY=sk-or-v1-...
+#   FRED_API_KEY=...          (선택)
+#   NEWS_API_KEY=...          (선택)
+
+# 모델 ID 확인 (Gemma 4 26B는 미존재 가능 — 카탈로그에서 정확한 ID 찾기)
+python -m scripts.list_models gemma
+python -m scripts.list_models gpt-oss
+
+# 필요하면 backend/app/schemas/inputs.py의 ModelChoice enum 업데이트
+uvicorn app.main:app --reload --port 8000
+```
+
+### Docker Compose
+
+```bash
+# backend/.env 작성 후
+docker compose up --build
+```
+
+### 디렉토리 구조 (웹 앱 부분)
+
+```
+backend/
+├── app/
+│   ├── main.py                  # FastAPI 진입 + 라우터 등록 + lifespan(init_db)
+│   ├── config.py                # pydantic-settings
+│   ├── openrouter.py            # AsyncOpenAI + OpenRouter base_url
+│   ├── openrouter_demo.py       # demo 모드 canned 응답
+│   ├── orchestrator.py          # fetch → agents.gather → reviewer → SSE
+│   ├── agents/                  # FundamentalAgent / TechnicalAgent / ReviewerAgent
+│   ├── data/                    # yfinance / FRED / NewsAPI / Tavily
+│   ├── prompts/                 # system/{role}.md + methodology/{topic}.md
+│   ├── routes/                  # /api/{health,models,analyze,jobs}
+│   ├── schemas/                 # inputs / outputs / events / data
+│   ├── storage/                 # aiosqlite jobs
+│   └── utils/                   # prompt_loader / markdown / sse
+├── scripts/
+│   ├── smoke.py                 # 라이브 데이터 수집 스모크
+│   └── list_models.py           # OpenRouter 카탈로그 조회
+└── tests/                       # pytest (모킹 기반, 네트워크 없음)
+
+frontend/
+├── app/
+│   ├── page.tsx                 # 입력 폼 + 진행률 + 보고서
+│   └── analyze/[jobId]/page.tsx # 과거 작업 결과 뷰어
+├── components/                  # InputForm / AgentCard / ProgressTracker / ReportViewer
+└── lib/                         # types / sse / api / state(reducer)
+```
+
+### SSE 이벤트 시퀀스
+
+```
+job_start → data_fetch_start → data_fetch_done →
+agent_start × 2 → agent_done × 2 (완료 순서) →
+reviewer_start → reviewer_done → done (ok=true/false)
+```
+
+실패 시에도 항상 `done` 이벤트로 닫혀 프론트엔드가 클린하게 종료 가능. 부분 실패(한 에이전트 실패) 시 다른 에이전트와 reviewer는 계속 진행.
+
+### 테스트
+
+```powershell
+cd backend
+pytest                            # 단위·통합 테스트 (네트워크 없음, 모킹 기반)
+python -m scripts.smoke NVDA 2026-05-13   # 라이브 yfinance + FRED + News 스모크
+```
+
+### 트러블슈팅
+
+| 증상 | 원인·해결 |
+|------|---------|
+| `RuntimeError: Cannot install on Python version 3.14.x` | numba (선택적 dep)가 3.14 미지원. 본 프로젝트는 pandas-ta를 제거했으므로 영향 없음 — 캐시 정리 후 재시도 |
+| `OPENROUTER_API_KEY missing` | `backend/.env`에 키 입력. 또는 `OPENROUTER_API_KEY=demo`로 데모 모드 |
+| 분석 시 `JSON 검증 실패 → 재시도` 로그 | 약한 모델의 JSON 출력 실패 — 1회 자동 재시도 (`agents/base.py`). 2회 모두 실패 시 `AgentExecutionError` |
+| yfinance가 빈 결과 반환 | 휴장일·잘못된 티커. `data_caveats`에 명시되어 보고서에 노출됨 |
+| 모델 ID 오류 (`model not found`) | `python -m scripts.list_models gemma`로 실제 ID 확인 후 `app/schemas/inputs.py:ModelChoice` 갱신 |
+| 프론트엔드 `/api/*` 502/404 | `next.config.mjs` rewrites가 `NEXT_PUBLIC_BACKEND_URL`(default `http://localhost:8000`)로 프록시 — 백엔드 미실행 또는 다른 포트 |
+
+상세 설계·작업 분할: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 
 ---
 

@@ -1,0 +1,217 @@
+// Mirror of backend Pydantic schemas. Keep this file in sync with
+// backend/app/schemas/{inputs,outputs,events,data}.py.
+
+// --- Requests ---------------------------------------------------------------
+
+export type ModelChoice = "google/gemma-3-27b-it" | "openai/gpt-oss-120b";
+
+export interface AnalyzeRequest {
+  asset: string;
+  asOfDate: string; // YYYY-MM-DD
+  model: ModelChoice;
+}
+
+export interface ModelEntry {
+  id: ModelChoice;
+  label: string;
+  default: boolean;
+}
+
+export interface ModelsResponse {
+  models: ModelEntry[];
+  default: string;
+  openrouter_configured: boolean;
+}
+
+// --- Outputs ---------------------------------------------------------------
+
+export type Label = "fact" | "estimate" | "opinion";
+export type ScenarioName = "bullish" | "base" | "bearish";
+
+export interface Citation {
+  source: string;
+  url?: string | null;
+  date_ref?: string | null;
+}
+
+export interface Claim {
+  text: string;
+  label: Label;
+  citations: Citation[];
+}
+
+export interface Scenario {
+  name: ScenarioName;
+  triggers: string[];
+  assumptions: string[];
+  target_range_low?: number | null;
+  target_range_high?: number | null;
+  probability_qualitative?: "low" | "medium" | "high" | null;
+  rationale?: string | null;
+}
+
+export interface FinancialTrendRow {
+  period: string;
+  revenue?: number | null;
+  operating_income?: number | null;
+  net_income?: number | null;
+  eps?: number | null;
+  op_margin?: number | null;
+}
+
+export interface ValuationMetric {
+  metric: string;
+  value?: number | null;
+  peer_median?: number | null;
+  note?: string | null;
+}
+
+export interface FundamentalOutput {
+  summary: string;
+  financial_trend: FinancialTrendRow[];
+  valuation_metrics: ValuationMetric[];
+  key_drivers: Claim[];
+  risks: Claim[];
+  scenarios: Scenario[];
+  data_caveats: string[];
+}
+
+export interface Level {
+  kind: "support" | "resistance";
+  price: number;
+  rationale?: string | null;
+}
+
+export interface TechnicalOutput {
+  summary: string;
+  trend: string;
+  moving_averages: Record<string, number | null>;
+  momentum: string;
+  levels: Level[];
+  scenarios: Scenario[];
+  data_caveats: string[];
+}
+
+export interface Discrepancy {
+  metric: string;
+  values: string[];
+  resolution?: string | null;
+}
+
+export interface ReviewerOutput {
+  final_report_markdown: string;
+  discrepancies: Discrepancy[];
+  open_questions: string[];
+  used_model?: string | null;
+}
+
+// --- SSE events ------------------------------------------------------------
+
+export type EventType =
+  | "job_start"
+  | "data_fetch_start"
+  | "data_fetch_progress"
+  | "data_fetch_done"
+  | "agent_start"
+  | "agent_done"
+  | "reviewer_start"
+  | "reviewer_done"
+  | "error"
+  | "done";
+
+export interface SSEMessage<TData = any> {
+  event: EventType;
+  data: TData;
+}
+
+export interface TokenUsage {
+  prompt?: number | null;
+  completion?: number | null;
+  total?: number | null;
+}
+
+export interface JobStartData {
+  jobId: string;
+  asset: string;
+  asOfDate: string;
+  model: string;
+}
+
+export interface DataFetchDoneData {
+  summary: {
+    ticker: string;
+    as_of_date: string;
+    price_rows: number;
+    quarters: number;
+    news_count: number;
+    macro_available: boolean;
+    errors: string[];
+  };
+  errors: string[];
+}
+
+export interface AgentDoneData {
+  agent: "fundamental" | "technical";
+  output: FundamentalOutput | TechnicalOutput;
+  tokens: TokenUsage;
+  model: string;
+  retried: boolean;
+}
+
+export interface ReviewerDoneData {
+  report: string;
+  discrepancies: Discrepancy[];
+  openQuestions: string[];
+  tokens: TokenUsage;
+  model: string;
+  retried: boolean;
+}
+
+export interface DoneData {
+  jobId: string;
+  durationMs: number;
+  ok: boolean;
+  tokens?: TokenUsage;
+}
+
+export interface ErrorData {
+  stage: "data_fetch" | "agent" | "reviewer" | string;
+  agent?: string;
+  message: string;
+}
+
+// --- Job record ------------------------------------------------------------
+
+export interface JobRecord {
+  id: string;
+  asset: string;
+  as_of_date: string;
+  model: string;
+  status: "running" | "completed" | "failed";
+  created_at: string;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  error?: string | null;
+  data_summary?: Record<string, unknown> | null;
+  fundamental?: FundamentalOutput | null;
+  technical?: TechnicalOutput | null;
+  reviewer_report?: string | null;
+  discrepancies?: Discrepancy[] | null;
+  open_questions?: string[] | null;
+  token_usage?: TokenUsage | null;
+}
+
+export interface JobsListResponse {
+  jobs: Array<{
+    id: string;
+    asset: string;
+    as_of_date: string;
+    model: string;
+    status: string;
+    created_at: string;
+    completed_at?: string | null;
+    duration_ms?: number | null;
+    error?: string | null;
+  }>;
+  count: number;
+}
