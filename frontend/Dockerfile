@@ -5,6 +5,12 @@ RUN npm install --no-audit --no-fund
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+# next.config.mjs reads NEXT_PUBLIC_BACKEND_URL inside rewrites(), which
+# Next.js evaluates during `next build` and bakes into the build output.
+# Railway forwards matching service variables as Docker build args when the
+# Dockerfile declares them with ARG.
+ARG NEXT_PUBLIC_BACKEND_URL
+ENV NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
