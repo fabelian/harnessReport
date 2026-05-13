@@ -17,4 +17,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 EXPOSE 3000
+# `next start` reads $PORT automatically (defaults to 3000), so Railway/Render
+# injection works without extra plumbing.
 CMD ["npm", "start"]
