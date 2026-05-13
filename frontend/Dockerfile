@@ -22,7 +22,10 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
-EXPOSE 3000
+EXPOSE 8000
 # `next start` reads $PORT automatically (defaults to 3000), so Railway/Render
-# injection works without extra plumbing.
+# injection works without extra plumbing. EXPOSE is metadata only, but Railway
+# uses it as a hint for target port routing when no explicit Target Port is
+# set in the service settings — keep it aligned with the service's PORT env
+# (currently 8000) to avoid edge → container port mismatches.
 CMD ["npm", "start"]
