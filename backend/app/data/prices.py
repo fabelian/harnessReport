@@ -129,6 +129,13 @@ def _fetch_sync(ticker: str, as_of_date: date) -> pd.DataFrame:
     if df.empty:
         raise ValueError(f"yfinance returned empty history for {ticker}")
     df = df.dropna(subset=["Close"])
+    # yfinance returns a tz-aware DatetimeIndex for non-US exchanges (e.g.
+    # 000660.KS comes back as Asia/Seoul), which then can't be compared against
+    # the tz-naive Timestamp used for the YTD slice in _compute_summary. Daily
+    # OHLCV is date-grained, so drop the timezone here as the single point of
+    # normalization and let downstream code assume naive timestamps.
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
     return df
 
 
