@@ -1,0 +1,17 @@
+# User-local Claude Code settings (per-machine, not shared)
+.claude/settings.local.json
+
+# Oh-My-ClaudeCode runtime state
+.omc/state/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Node / build artifacts (if any are added later)
+node_modules/
+dist/
+build/
