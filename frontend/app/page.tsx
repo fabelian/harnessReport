@@ -30,22 +30,27 @@ export default function HomePage() {
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Strategy: navigate to the polling job page as soon as we have a
+      // jobId. The SSE consumer continues in the background (we deliberately
+      // do NOT abort on navigation) so the backend keeps running to
+      // completion and persists the result. Any per-event failure mode
+      // (mobile Safari "Load failed", backend done(ok:false), Railway edge
+      // dropping the long-lived stream) becomes invisible to the user — the
+      // polling page picks up the result whenever it lands.
       try {
         for await (const msg of streamAnalysis(req, controller.signal)) {
           if (msg.event === "job_start") {
             const id = (msg.data as { jobId?: string }).jobId ?? null;
-            if (id) jobIdRef.current = id;
+            if (id && !jobIdRef.current) {
+              jobIdRef.current = id;
+              router.push(`/analyze/${id}`);
+            }
           }
           dispatch({ type: "EVENT", msg });
         }
       } catch (err) {
-        if (controller.signal.aborted) {
-          // User-initiated cancel — don't treat as failure.
-          return;
-        }
+        if (controller.signal.aborted) return;
         if (jobIdRef.current) {
-          // Backend job is still running and will persist; let the polling
-          // page take over.
           router.push(`/analyze/${jobIdRef.current}`);
           return;
         }
