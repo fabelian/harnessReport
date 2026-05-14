@@ -5,7 +5,7 @@ import { useCallback, useReducer, useRef, useState } from "react";
 import { InputForm } from "@/components/InputForm";
 import { ProgressTracker } from "@/components/ProgressTracker";
 import { ReportViewer } from "@/components/ReportViewer";
-import { initialState, reduce } from "@/lib/state";
+import { ANALYST_ROLES, initialState, reduce } from "@/lib/state";
 import { streamAnalysis } from "@/lib/sse";
 import type { AnalyzeRequest } from "@/lib/types";
 
@@ -83,10 +83,40 @@ export default function HomePage() {
       {state.phase === "failed" && !reviewerReport && (
         <section className="mt-8 rounded-lg border border-rose-200 bg-rose-50 p-6 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
           <h2 className="font-semibold">분석 실패</h2>
-          <p className="mt-1">
-            아래 오류 로그를 확인하세요. 백엔드 OPENROUTER_API_KEY 또는 외부 API
-            상태를 점검하세요.
-          </p>
+          {(() => {
+            const agentErrors = ANALYST_ROLES.flatMap((role) => {
+              const a = state.agents[role];
+              return a.status === "failed" && a.error
+                ? [{ stage: "agent", agent: role, message: a.error }]
+                : [];
+            });
+            const reviewerError =
+              state.reviewer.status === "failed" && state.reviewer.error
+                ? [{ stage: "reviewer", message: state.reviewer.error }]
+                : [];
+            const all = [...state.errors, ...agentErrors, ...reviewerError];
+            if (all.length === 0) {
+              return (
+                <p className="mt-1">
+                  스트림이 종료됐지만 오류 메시지가 수신되지 않았습니다. 백엔드
+                  로그를 확인하세요.
+                </p>
+              );
+            }
+            return (
+              <ul className="mt-2 space-y-1.5">
+                {all.map((e, i) => (
+                  <li key={i} className="font-mono text-xs">
+                    <span className="rounded bg-rose-200/60 px-1.5 py-0.5 text-rose-950 dark:bg-rose-900/40 dark:text-rose-100">
+                      {e.stage}
+                      {"agent" in e && e.agent ? `:${e.agent}` : ""}
+                    </span>{" "}
+                    <span className="break-all">{e.message}</span>
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
         </section>
       )}
     </main>
