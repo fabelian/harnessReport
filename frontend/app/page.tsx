@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { InputForm } from "@/components/InputForm";
 import { ProgressTracker } from "@/components/ProgressTracker";
@@ -65,6 +65,18 @@ export default function HomePage() {
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  // Any path that ends in failure but with a jobId in hand should hand off
+  // to the polling job page — covers both thrown stream errors (mobile
+  // Safari "Load failed") and the backend emitting done(ok:false) after the
+  // for-await loop exited normally. Without this, the home page would just
+  // show a generic failure box even though the backend job is still running
+  // and will persist a result.
+  useEffect(() => {
+    if (state.phase === "failed" && state.jobId) {
+      router.push(`/analyze/${state.jobId}`);
+    }
+  }, [state.phase, state.jobId, router]);
 
   const reviewerReport = state.reviewer.report;
 
