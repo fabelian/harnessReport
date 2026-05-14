@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useReducer, useRef, useState } from "react";
 
 import { InputForm } from "@/components/InputForm";
@@ -10,33 +11,85 @@ import { ANALYST_ROLES, initialState, reduce } from "@/lib/state";
 import { streamAnalysis } from "@/lib/sse";
 import type { AnalyzeRequest } from "@/lib/types";
 
+/** True for browsers where a long fetch SSE stream is unreliable.
+ * iOS Safari + cellular is the canonical case ("Load failed" on first
+ * idle gap). For these we skip SSE entirely and use the start+poll path. */
+function streamingUnreliable(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return (
+    /iP(hone|ad|od)/.test(ua) &&
+    /Safari/.test(ua) &&
+    !/CriOS|FxiOS|EdgiOS/.test(ua)
+  );
+}
+
 export default function HomePage() {
+  const router = useRouter();
   const [state, dispatch] = useReducer(reduce, initialState);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = useCallback(async (req: AnalyzeRequest) => {
-    dispatch({ type: "RESET" });
-    setRunning(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      for await (const msg of streamAnalysis(req, controller.signal)) {
-        dispatch({ type: "EVENT", msg });
+  const startDetached = useCallback(
+    async (req: AnalyzeRequest) => {
+      const resp = await fetch("/api/analyze/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => "");
+        throw new Error(`/api/analyze/start ${resp.status}: ${body || resp.statusText}`);
       }
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      const message =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message?: unknown }).message ?? err)
-          : String(err);
-      dispatch({ type: "STREAM_FAILED", message });
-    } finally {
-      setRunning(false);
-      abortRef.current = null;
-    }
-  }, []);
+      const data = (await resp.json()) as { jobId: string };
+      router.push(`/analyze/${data.jobId}`);
+    },
+    [router],
+  );
+
+  const handleSubmit = useCallback(
+    async (req: AnalyzeRequest) => {
+      dispatch({ type: "RESET" });
+
+      if (streamingUnreliable()) {
+        // Mobile Safari / cellular path — go straight to background job.
+        setRunning(true);
+        try {
+          await startDetached(req);
+        } catch (err) {
+          const message =
+            err && typeof err === "object" && "message" in err
+              ? String((err as { message?: unknown }).message ?? err)
+              : String(err);
+          dispatch({ type: "STREAM_FAILED", message });
+        } finally {
+          setRunning(false);
+        }
+        return;
+      }
+
+      setRunning(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      try {
+        for await (const msg of streamAnalysis(req, controller.signal)) {
+          dispatch({ type: "EVENT", msg });
+        }
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        const message =
+          err && typeof err === "object" && "message" in err
+            ? String((err as { message?: unknown }).message ?? err)
+            : String(err);
+        dispatch({ type: "STREAM_FAILED", message });
+      } finally {
+        setRunning(false);
+        abortRef.current = null;
+      }
+    },
+    [startDetached],
+  );
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
