@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useReducer, useRef, useState } from "react";
 
 import { InputForm } from "@/components/InputForm";
@@ -10,31 +11,56 @@ import { streamAnalysis } from "@/lib/sse";
 import type { AnalyzeRequest } from "@/lib/types";
 
 export default function HomePage() {
+  const router = useRouter();
   const [state, dispatch] = useReducer(reduce, initialState);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Captured during the SSE stream so the catch handler can redirect to the
+  // job page even though it cannot read the latest reducer state directly.
+  // iOS Safari frequently aborts long-lived fetch streams ("Load failed"),
+  // but the backend keeps running and persists results — falling back to the
+  // polling job page lets mobile users still see the final report.
+  const jobIdRef = useRef<string | null>(null);
 
-  const handleSubmit = useCallback(async (req: AnalyzeRequest) => {
-    dispatch({ type: "RESET" });
-    setRunning(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const handleSubmit = useCallback(
+    async (req: AnalyzeRequest) => {
+      dispatch({ type: "RESET" });
+      jobIdRef.current = null;
+      setRunning(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    try {
-      for await (const msg of streamAnalysis(req, controller.signal)) {
-        dispatch({ type: "EVENT", msg });
+      try {
+        for await (const msg of streamAnalysis(req, controller.signal)) {
+          if (msg.event === "job_start") {
+            const id = (msg.data as { jobId?: string }).jobId ?? null;
+            if (id) jobIdRef.current = id;
+          }
+          dispatch({ type: "EVENT", msg });
+        }
+      } catch (err) {
+        if (controller.signal.aborted) {
+          // User-initiated cancel — don't treat as failure.
+          return;
+        }
+        if (jobIdRef.current) {
+          // Backend job is still running and will persist; let the polling
+          // page take over.
+          router.push(`/analyze/${jobIdRef.current}`);
+          return;
+        }
+        const message =
+          err && typeof err === "object" && "message" in err
+            ? String((err as { message?: unknown }).message ?? err)
+            : String(err);
+        dispatch({ type: "STREAM_FAILED", message });
+      } finally {
+        setRunning(false);
+        abortRef.current = null;
       }
-    } catch (err) {
-      const message =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message?: unknown }).message ?? err)
-          : String(err);
-      dispatch({ type: "STREAM_FAILED", message });
-    } finally {
-      setRunning(false);
-      abortRef.current = null;
-    }
-  }, []);
+    },
+    [router],
+  );
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();

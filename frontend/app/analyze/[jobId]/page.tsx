@@ -10,15 +10,40 @@ interface Props {
   params: { jobId: string };
 }
 
+// Polling interval while the job is still running. The backend persists
+// jobs so this page is the fallback when SSE drops mid-stream (notably on
+// iOS Safari, where fetch streams frequently abort).
+const POLL_INTERVAL_MS = 5000;
+
 export default function JobPage({ params }: Props) {
   const [job, setJob] = useState<JobRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .job(params.jobId)
-      .then(setJob)
-      .catch((e) => setError(String(e)));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchOnce = () => {
+      api
+        .job(params.jobId)
+        .then((j) => {
+          if (cancelled) return;
+          setJob(j);
+          if (j.status === "running") {
+            timer = setTimeout(fetchOnce, POLL_INTERVAL_MS);
+          }
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setError(String(e));
+        });
+    };
+
+    fetchOnce();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [params.jobId]);
 
   if (error) {
@@ -59,6 +84,12 @@ export default function JobPage({ params }: Props) {
           </p>
         </div>
       </header>
+
+      {job.status === "running" && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+          분석 진행 중… 5초마다 자동 갱신됩니다. 완료되면 보고서가 표시됩니다.
+        </p>
+      )}
 
       {job.status === "failed" && (
         <p className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
