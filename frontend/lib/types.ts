@@ -3,7 +3,10 @@
 
 // --- Requests ---------------------------------------------------------------
 
-export type ModelChoice = "google/gemma-3-27b-it" | "openai/gpt-oss-120b";
+export type ModelChoice =
+  | "google/gemma-3-27b-it"
+  | "openai/gpt-oss-120b"
+  | "deepseek/deepseek-v4-pro";
 
 export interface AnalyzeRequest {
   asset: string;

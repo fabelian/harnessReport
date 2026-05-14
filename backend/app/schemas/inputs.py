@@ -16,12 +16,14 @@ class ModelChoice(str, Enum):
 
     gemma_3_27b = "google/gemma-3-27b-it"
     gpt_oss_120b = "openai/gpt-oss-120b"
+    deepseek_v4_pro = "deepseek/deepseek-v4-pro"
 
 
 # Human-friendly labels for the dropdown.
 MODEL_LABELS: dict[ModelChoice, str] = {
     ModelChoice.gemma_3_27b: "Gemma 3 27B (저렴·빠름)",
     ModelChoice.gpt_oss_120b: "GPT-OSS 120B (정밀)",
+    ModelChoice.deepseek_v4_pro: "DeepSeek V4 Pro",
 }
 
 
