@@ -1,9 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useReducer, useRef, useState } from "react";
 
 import { InputForm } from "@/components/InputForm";
+import { LogPanel } from "@/components/LogPanel";
 import { ProgressTracker } from "@/components/ProgressTracker";
 import { ReportViewer } from "@/components/ReportViewer";
 import { ANALYST_ROLES, initialState, reduce } from "@/lib/state";
@@ -11,77 +11,36 @@ import { streamAnalysis } from "@/lib/sse";
 import type { AnalyzeRequest } from "@/lib/types";
 
 export default function HomePage() {
-  const router = useRouter();
   const [state, dispatch] = useReducer(reduce, initialState);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  // Captured during the SSE stream so the catch handler can redirect to the
-  // job page even though it cannot read the latest reducer state directly.
-  // iOS Safari frequently aborts long-lived fetch streams ("Load failed"),
-  // but the backend keeps running and persists results — falling back to the
-  // polling job page lets mobile users still see the final report.
-  const jobIdRef = useRef<string | null>(null);
 
-  const handleSubmit = useCallback(
-    async (req: AnalyzeRequest) => {
-      dispatch({ type: "RESET" });
-      jobIdRef.current = null;
-      setRunning(true);
-      const controller = new AbortController();
-      abortRef.current = controller;
+  const handleSubmit = useCallback(async (req: AnalyzeRequest) => {
+    dispatch({ type: "RESET" });
+    setRunning(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-      // Strategy: navigate to the polling job page as soon as we have a
-      // jobId. The SSE consumer continues in the background (we deliberately
-      // do NOT abort on navigation) so the backend keeps running to
-      // completion and persists the result. Any per-event failure mode
-      // (mobile Safari "Load failed", backend done(ok:false), Railway edge
-      // dropping the long-lived stream) becomes invisible to the user — the
-      // polling page picks up the result whenever it lands.
-      try {
-        for await (const msg of streamAnalysis(req, controller.signal)) {
-          if (msg.event === "job_start") {
-            const id = (msg.data as { jobId?: string }).jobId ?? null;
-            if (id && !jobIdRef.current) {
-              jobIdRef.current = id;
-              router.push(`/analyze/${id}`);
-            }
-          }
-          dispatch({ type: "EVENT", msg });
-        }
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        if (jobIdRef.current) {
-          router.push(`/analyze/${jobIdRef.current}`);
-          return;
-        }
-        const message =
-          err && typeof err === "object" && "message" in err
-            ? String((err as { message?: unknown }).message ?? err)
-            : String(err);
-        dispatch({ type: "STREAM_FAILED", message });
-      } finally {
-        setRunning(false);
-        abortRef.current = null;
+    try {
+      for await (const msg of streamAnalysis(req, controller.signal)) {
+        dispatch({ type: "EVENT", msg });
       }
-    },
-    [router],
-  );
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message ?? err)
+          : String(err);
+      dispatch({ type: "STREAM_FAILED", message });
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  }, []);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
-
-  // Any path that ends in failure but with a jobId in hand should hand off
-  // to the polling job page — covers both thrown stream errors (mobile
-  // Safari "Load failed") and the backend emitting done(ok:false) after the
-  // for-await loop exited normally. Without this, the home page would just
-  // show a generic failure box even though the backend job is still running
-  // and will persist a result.
-  useEffect(() => {
-    if (state.phase === "failed" && state.jobId) {
-      router.push(`/analyze/${state.jobId}`);
-    }
-  }, [state.phase, state.jobId, router]);
 
   const reviewerReport = state.reviewer.report;
 
@@ -110,6 +69,8 @@ export default function HomePage() {
 
       <ProgressTracker state={state} />
 
+      <LogPanel logs={state.logs} />
+
       {reviewerReport && (
         <ReportViewer
           asset={state.asset}
@@ -124,7 +85,7 @@ export default function HomePage() {
       )}
 
       {state.phase === "failed" && !reviewerReport && (
-        <section className="mt-8 rounded-lg border border-rose-200 bg-rose-50 p-6 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
+        <section className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-6 text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
           <h2 className="font-semibold">분석 실패</h2>
           {(() => {
             const agentErrors = ANALYST_ROLES.flatMap((role) => {
@@ -138,26 +99,38 @@ export default function HomePage() {
                 ? [{ stage: "reviewer", message: state.reviewer.error }]
                 : [];
             const all = [...state.errors, ...agentErrors, ...reviewerError];
-            if (all.length === 0) {
-              return (
-                <p className="mt-1">
-                  스트림이 종료됐지만 오류 메시지가 수신되지 않았습니다. 백엔드
-                  로그를 확인하세요.
-                </p>
-              );
-            }
             return (
-              <ul className="mt-2 space-y-1.5">
-                {all.map((e, i) => (
-                  <li key={i} className="font-mono text-xs">
-                    <span className="rounded bg-rose-200/60 px-1.5 py-0.5 text-rose-950 dark:bg-rose-900/40 dark:text-rose-100">
-                      {e.stage}
-                      {"agent" in e && e.agent ? `:${e.agent}` : ""}
-                    </span>{" "}
-                    <span className="break-all">{e.message}</span>
-                  </li>
-                ))}
-              </ul>
+              <>
+                {all.length === 0 ? (
+                  <p className="mt-1">
+                    스트림이 종료됐지만 오류 이벤트가 도착하지 않았습니다. 위 로그
+                    마지막 줄을 확인하세요.
+                  </p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5">
+                    {all.map((e, i) => (
+                      <li key={i} className="font-mono text-xs">
+                        <span className="rounded bg-rose-200/60 px-1.5 py-0.5 text-rose-950 dark:bg-rose-900/40 dark:text-rose-100">
+                          {e.stage}
+                          {"agent" in e && e.agent ? `:${e.agent}` : ""}
+                        </span>{" "}
+                        <span className="break-all">{e.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {state.jobId && (
+                  <p className="mt-3 text-xs">
+                    백엔드는 계속 진행 중일 수 있습니다 →{" "}
+                    <a
+                      href={`/analyze/${state.jobId}`}
+                      className="text-blue-700 underline dark:text-blue-400"
+                    >
+                      작업 페이지에서 결과 확인
+                    </a>
+                  </p>
+                )}
+              </>
             );
           })()}
         </section>

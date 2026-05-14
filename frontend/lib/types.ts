@@ -165,8 +165,10 @@ export type EventType =
   | "data_fetch_progress"
   | "data_fetch_done"
   | "agent_start"
+  | "agent_step"
   | "agent_done"
   | "reviewer_start"
+  | "reviewer_step"
   | "reviewer_done"
   | "error"
   | "done";
@@ -239,9 +241,82 @@ export interface DoneData {
 }
 
 export interface ErrorData {
-  stage: "data_fetch" | "agent" | "reviewer" | string;
+  stage: "data_fetch" | "agent" | "reviewer" | "stream" | string;
   agent?: string;
   message: string;
+  function?: string;
+  tracebackTail?: string;
+  elapsedMs?: number;
+  agentElapsedMs?: number;
+  reviewerElapsedMs?: number;
+}
+
+export interface DataFetchProgressData {
+  source: "resolver" | "prices" | "fundamentals" | "news" | "macro" | string;
+  status: "start" | "done" | "error";
+  sourceElapsedMs?: number | null;
+  elapsedMs?: number;
+}
+
+export interface AgentStepData {
+  agent: AgentRole;
+  step:
+    | "llm_request"
+    | "llm_response"
+    | "llm_error"
+    | "validate"
+    | "retry"
+    | string;
+  attempt?: number;
+  model?: string;
+  promptChars?: number;
+  systemChars?: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  finishReason?: string | null;
+  elapsedMs?: number;
+  agentElapsedMs?: number | null;
+  ok?: boolean;
+  errorType?: string;
+  message?: string;
+  reason?: string;
+}
+
+export interface ReviewerStepData {
+  step:
+    | "llm_request"
+    | "llm_response"
+    | "llm_error"
+    | "validate"
+    | "retry"
+    | string;
+  attempt?: number;
+  model?: string;
+  promptChars?: number;
+  systemChars?: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  finishReason?: string | null;
+  elapsedMs?: number;
+  reviewerElapsedMs?: number;
+  ok?: boolean;
+  errorType?: string;
+  message?: string;
+  reason?: string;
+}
+
+// --- Frontend-only --------------------------------------------------------
+
+/** Single chronological log entry rendered by LogPanel. */
+export interface LogEntry {
+  ts: number; // epoch ms (client clock)
+  elapsedMs?: number; // server-side elapsed since job_start, when known
+  stage: string; // e.g. "job", "data_fetch", "agent:fundamental", "reviewer", "stream"
+  message: string;
+  level: "info" | "warn" | "error";
+  detail?: string; // expandable extra (traceback, etc.)
 }
 
 // --- Job record ------------------------------------------------------------

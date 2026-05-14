@@ -1,7 +1,7 @@
 """Macro analyst — produces a `MacroOutput` from `AnalysisData`."""
 from __future__ import annotations
 
-from app.agents.base import AgentRun, BaseAgent
+from app.agents.base import AgentRun, BaseAgent, OnStep
 from app.schemas.data import AnalysisData
 from app.schemas.outputs import MacroOutput
 from app.utils.markdown import render_full_context
@@ -21,9 +21,10 @@ class MacroAgent(BaseAgent):
         data: AnalysisData,
         *,
         model: str | None = None,
+        on_step: OnStep | None = None,
     ) -> AgentRun:
         user_prompt = self.build_user_prompt(data)
         output, result, retried = await self._call_and_parse(
-            user_prompt=user_prompt, model=model
+            user_prompt=user_prompt, model=model, on_step=on_step
         )
         return self._build_run(self.role, output, result, retried)

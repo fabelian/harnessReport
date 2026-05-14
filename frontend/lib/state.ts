@@ -1,18 +1,25 @@
 // Reducer driving the live analysis page.
 //
 // Folds the SSE event stream into a structured state shape that the UI can
-// render without inspecting individual events.
+// render without inspecting individual events, and also accumulates a
+// chronological `logs` array so the frontend can show exactly where the run
+// is at — including which external API call (yfinance, FRED, news provider,
+// OpenRouter) is currently in flight or where a failure happened.
 
 import type {
   AgentDoneData,
   AgentRole,
+  AgentStepData,
   DataFetchDoneData,
+  DataFetchProgressData,
   DoneData,
   ErrorData,
   IndustryOutput,
   JobStartData,
+  LogEntry,
   MacroOutput,
   ReviewerDoneData,
+  ReviewerStepData,
   SentimentOutput,
   SSEMessage,
   FundamentalOutput,
@@ -74,6 +81,7 @@ export interface AnalysisState {
   agents: AgentsState;
   reviewer: ReviewerState;
   errors: ErrorData[];
+  logs: LogEntry[];
   durationMs: number | null;
   tokens: TokenUsage | null;
 }
@@ -120,6 +128,7 @@ export const initialState: AnalysisState = {
   agents: blankAgents(),
   reviewer: blankReviewer(),
   errors: [],
+  logs: [],
   durationMs: null,
   tokens: null,
 };
@@ -133,18 +142,187 @@ function isAnalystRole(role: string | undefined): role is AgentRole {
   return !!role && (ANALYST_ROLES as readonly string[]).includes(role);
 }
 
+function fmtElapsed(ms?: number | null): string {
+  if (ms === undefined || ms === null) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Build a LogEntry from an SSE message. Returns null if the event is not
+ * worth surfacing (extremely unlikely — we log everything for visibility). */
+function logFromMessage(msg: SSEMessage): LogEntry | null {
+  const ts = Date.now();
+  const elapsedMs = (msg.data as { elapsedMs?: number })?.elapsedMs;
+  switch (msg.event) {
+    case "job_start": {
+      const d = msg.data as JobStartData;
+      return {
+        ts,
+        elapsedMs,
+        stage: "job",
+        level: "info",
+        message: `job_start ${d.jobId.slice(0, 8)} | ${d.asset} | ${d.model}`,
+      };
+    }
+    case "data_fetch_start":
+      return {
+        ts,
+        elapsedMs,
+        stage: "data_fetch",
+        level: "info",
+        message: "data_fetch start",
+      };
+    case "data_fetch_progress": {
+      const d = msg.data as DataFetchProgressData;
+      const elapsed = fmtElapsed(d.sourceElapsedMs ?? null);
+      return {
+        ts,
+        elapsedMs,
+        stage: `data_fetch:${d.source}`,
+        level: d.status === "error" ? "error" : "info",
+        message:
+          d.status === "start"
+            ? `${d.source} → start`
+            : `${d.source} → ${d.status}${elapsed ? ` (${elapsed})` : ""}`,
+      };
+    }
+    case "data_fetch_done": {
+      const d = msg.data as DataFetchDoneData;
+      const s = d.summary;
+      return {
+        ts,
+        elapsedMs,
+        stage: "data_fetch",
+        level: d.errors?.length ? "warn" : "info",
+        message: `data_fetch done | price_rows=${s.price_rows} quarters=${s.quarters} news=${s.news_count} macro=${s.macro_available}${d.errors?.length ? ` | errors=${d.errors.length}` : ""}`,
+        detail: d.errors?.length ? d.errors.join("\n") : undefined,
+      };
+    }
+    case "agent_start": {
+      const role = (msg.data as { agent: string }).agent;
+      return {
+        ts,
+        elapsedMs,
+        stage: `agent:${role}`,
+        level: "info",
+        message: "start",
+      };
+    }
+    case "agent_step": {
+      const d = msg.data as AgentStepData;
+      const parts: string[] = [d.step];
+      if (d.attempt) parts.push(`#${d.attempt}`);
+      if (d.elapsedMs !== undefined && d.step.includes("response"))
+        parts.push(`${fmtElapsed(d.elapsedMs)}`);
+      if (d.totalTokens != null) parts.push(`tokens=${d.totalTokens}`);
+      if (d.finishReason) parts.push(`finish=${d.finishReason}`);
+      if (d.errorType) parts.push(`${d.errorType}`);
+      if (d.message) parts.push(`— ${d.message}`);
+      if (d.reason) parts.push(`reason=${d.reason}`);
+      const hasErr = d.step === "llm_error" || d.ok === false;
+      return {
+        ts,
+        elapsedMs,
+        stage: `agent:${d.agent}`,
+        level: hasErr ? "warn" : "info",
+        message: parts.join(" "),
+      };
+    }
+    case "agent_done": {
+      const d = msg.data as AgentDoneData & { elapsedMs?: number };
+      return {
+        ts,
+        elapsedMs: d.elapsedMs ?? elapsedMs,
+        stage: `agent:${d.agent}`,
+        level: "info",
+        message: `done${d.retried ? " (retried)" : ""} tokens=${d.tokens?.total ?? "?"}`,
+      };
+    }
+    case "reviewer_start":
+      return {
+        ts,
+        elapsedMs,
+        stage: "reviewer",
+        level: "info",
+        message: "start",
+      };
+    case "reviewer_step": {
+      const d = msg.data as ReviewerStepData;
+      const parts: string[] = [d.step];
+      if (d.attempt) parts.push(`#${d.attempt}`);
+      if (d.elapsedMs !== undefined && d.step.includes("response"))
+        parts.push(`${fmtElapsed(d.elapsedMs)}`);
+      if (d.totalTokens != null) parts.push(`tokens=${d.totalTokens}`);
+      if (d.finishReason) parts.push(`finish=${d.finishReason}`);
+      if (d.errorType) parts.push(`${d.errorType}`);
+      if (d.message) parts.push(`— ${d.message}`);
+      if (d.reason) parts.push(`reason=${d.reason}`);
+      const hasErr = d.step === "llm_error" || d.ok === false;
+      return {
+        ts,
+        elapsedMs,
+        stage: "reviewer",
+        level: hasErr ? "warn" : "info",
+        message: parts.join(" "),
+      };
+    }
+    case "reviewer_done": {
+      const d = msg.data as ReviewerDoneData & { elapsedMs?: number };
+      return {
+        ts,
+        elapsedMs: (d as any).elapsedMs ?? elapsedMs,
+        stage: "reviewer",
+        level: "info",
+        message: `done${d.retried ? " (retried)" : ""} tokens=${d.tokens?.total ?? "?"}`,
+      };
+    }
+    case "error": {
+      const d = msg.data as ErrorData;
+      const stagePrefix = d.agent ? `${d.stage}:${d.agent}` : d.stage;
+      return {
+        ts,
+        elapsedMs,
+        stage: stagePrefix,
+        level: "error",
+        message: d.message,
+        detail: [d.function, d.tracebackTail].filter(Boolean).join("\n\n"),
+      };
+    }
+    case "done": {
+      const d = msg.data as DoneData;
+      return {
+        ts,
+        elapsedMs,
+        stage: "job",
+        level: d.ok ? "info" : "error",
+        message: `done ok=${d.ok} duration=${fmtElapsed(d.durationMs)}${d.tokens?.total ? ` tokens=${d.tokens.total}` : ""}`,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 export function reduce(state: AnalysisState, action: Action): AnalysisState {
-  if (action.type === "RESET") return { ...initialState, agents: blankAgents() };
+  if (action.type === "RESET") return { ...initialState, agents: blankAgents(), logs: [] };
   if (action.type === "STREAM_FAILED") {
+    const entry: LogEntry = {
+      ts: Date.now(),
+      stage: "stream",
+      level: "error",
+      message: action.message,
+    };
     return {
       ...state,
       phase: "failed",
-      errors: [
-        ...state.errors,
-        { stage: "stream", message: action.message },
-      ],
+      errors: [...state.errors, { stage: "stream", message: action.message }],
+      logs: [...state.logs, entry],
     };
   }
+
+  // Append a log entry for every event.
+  const entry = logFromMessage(action.msg);
+  const logs = entry ? [...state.logs, entry] : state.logs;
 
   const { event, data } = action.msg;
   switch (event) {
@@ -152,6 +330,7 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
       const d = data as JobStartData;
       return {
         ...state,
+        logs,
         phase: "starting",
         jobId: d.jobId,
         asset: d.asset,
@@ -160,11 +339,14 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
       };
     }
     case "data_fetch_start":
-      return { ...state, phase: "fetching" };
+      return { ...state, logs, phase: "fetching" };
+    case "data_fetch_progress":
+      return { ...state, logs };
     case "data_fetch_done": {
       const d = data as DataFetchDoneData;
       return {
         ...state,
+        logs,
         phase: "analyzing",
         dataFetchSummary: d.summary,
         errors: d.errors?.length
@@ -177,20 +359,24 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
     }
     case "agent_start": {
       const role = (data as { agent: string }).agent;
-      if (!isAnalystRole(role)) return state;
+      if (!isAnalystRole(role)) return { ...state, logs };
       return {
         ...state,
+        logs,
         agents: {
           ...state.agents,
           [role]: { ...state.agents[role], status: "running" },
         },
       };
     }
+    case "agent_step":
+      return { ...state, logs };
     case "agent_done": {
       const d = data as AgentDoneData;
-      if (!isAnalystRole(d.agent)) return state;
+      if (!isAnalystRole(d.agent)) return { ...state, logs };
       return {
         ...state,
+        logs,
         agents: {
           ...state.agents,
           [d.agent]: {
@@ -206,13 +392,17 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
     case "reviewer_start":
       return {
         ...state,
+        logs,
         phase: "reviewing",
         reviewer: { ...state.reviewer, status: "running" },
       };
+    case "reviewer_step":
+      return { ...state, logs };
     case "reviewer_done": {
       const d = data as ReviewerDoneData;
       return {
         ...state,
+        logs,
         reviewer: {
           status: "done",
           report: d.report,
@@ -226,7 +416,7 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
     }
     case "error": {
       const d = data as ErrorData;
-      const next = { ...state, errors: [...state.errors, d] };
+      const next = { ...state, logs, errors: [...state.errors, d] };
       if (d.stage === "agent" && isAnalystRole(d.agent)) {
         next.agents = {
           ...state.agents,
@@ -245,12 +435,13 @@ export function reduce(state: AnalysisState, action: Action): AnalysisState {
       const d = data as DoneData;
       return {
         ...state,
+        logs,
         phase: d.ok ? "done" : "failed",
         durationMs: d.durationMs,
         tokens: d.tokens ?? state.tokens,
       };
     }
     default:
-      return state;
+      return { ...state, logs };
   }
 }

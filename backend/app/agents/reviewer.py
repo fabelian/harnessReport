@@ -1,7 +1,7 @@
 """Integrator-reviewer — merges analyst outputs into a final markdown report."""
 from __future__ import annotations
 
-from app.agents.base import AgentRun, BaseAgent
+from app.agents.base import AgentRun, BaseAgent, OnStep
 from app.schemas.data import AnalysisData
 from app.schemas.outputs import (
     FundamentalOutput,
@@ -46,12 +46,13 @@ class ReviewerAgent(BaseAgent):
         sentiment: SentimentOutput | None = None,
         *,
         model: str | None = None,
+        on_step: OnStep | None = None,
     ) -> AgentRun:
         user_prompt = self.build_user_prompt(
             data, fundamental, technical, industry, macro, sentiment
         )
         output, result, retried = await self._call_and_parse(
-            user_prompt=user_prompt, model=model
+            user_prompt=user_prompt, model=model, on_step=on_step
         )
         # Stamp the model name back into the structured output for traceability.
         if isinstance(output, ReviewerOutput) and not output.used_model:
